@@ -43,7 +43,11 @@
 #include <base_local_planner/costmap_model.h>
 #include <costmap_2d/costmap_2d_ros.h>
 #include <geometry_msgs/Pose2D.h>
+#include <geometry_msgs/Twist.h>
 #include <std_msgs/Bool.h>
+
+// tf2 only
+#include <tf2_ros/transform_listener.h>
 
 namespace gm=geometry_msgs;
 namespace cmap=costmap_2d;
@@ -51,110 +55,115 @@ namespace blp=base_local_planner;
 using std::vector;
 using std::max;
 
+namespace tf{ class TransformListener;}
 namespace stepback_and_steerturn_recovery
 {
 
-/// Recovery behavior that takes a given twist and tries to execute it for up to
-/// d seconds, or until reaching an obstacle.  
-class StepBackAndSteerTurnRecovery : public nav_core::RecoveryBehavior
-{
-public:
-  
-  /// Doesn't do anything: initialize is where the actual work happens
-  StepBackAndSteerTurnRecovery();
-
-  ~StepBackAndSteerTurnRecovery();
-
-  /// Initialize the parameters of the behavior
-  void initialize (std::string n, tf::TransformListener* tf,
-                   costmap_2d::Costmap2DROS* global_costmap,
-                   costmap_2d::Costmap2DROS* local_costmap);
-
-  /// Run the behavior
-  void runBehavior();
-
-private:
-  enum COSTMAP_SEARCH_MODE
+  /// Recovery behavior that takes a given twist and tries to execute it for up to
+  /// d seconds, or until reaching an obstacle.  
+  class StepBackAndSteerTurnRecovery : public nav_core::RecoveryBehavior
   {
-    FORWARD,
-    FORWARD_LEFT,
-    FORWARD_RIGHT,
-    BACKWARD
+    public:
+      
+      /// Doesn't do anything: initialize is where the actual work happens
+      StepBackAndSteerTurnRecovery();
+
+      ~StepBackAndSteerTurnRecovery();
+
+      /// Initialize the parameters of the behavior
+      // void initialize (std::string n, tf::TransformListener* tf,
+      //                  costmap_2d::Costmap2DROS* global_costmap,
+      //                  costmap_2d::Costmap2DROS* local_costmap);
+      void initialize (std::string n, tf2_ros::Buffer* tf,
+                      costmap_2d::Costmap2DROS* global_costmap,
+                      costmap_2d::Costmap2DROS* local_costmap);
+
+      /// Run the behavior
+      void runBehavior();
+
+    private:
+      enum COSTMAP_SEARCH_MODE
+      {
+        FORWARD,
+        FORWARD_LEFT,
+        FORWARD_RIGHT,
+        BACKWARD
+      };
+
+      enum TURN_DIRECTION
+      {
+        LEFT,
+        RIGHT,
+      };
+
+      enum TURN_NO
+      {
+        FIRST_TURN = 0,
+        SECOND_TURN = 1,
+      };
+      static const int CNT_TURN = 2;
+
+      gm::Twist TWIST_STOP;
+
+      gm::Pose2D getCurrentLocalPose () const;
+      gm::Twist scaleGivenAccelerationLimits (const gm::Twist& twist, const double time_remaining) const;
+      gm::Pose2D getPoseToObstacle (const gm::Pose2D& current, const gm::Twist& twist) const;
+      double normalizedPoseCost (const gm::Pose2D& pose) const;
+      gm::Twist transformTwist (const gm::Pose2D& pose) const;
+      void moveSpacifiedLength (const gm::Twist twist, const double length, const COSTMAP_SEARCH_MODE mode = FORWARD) const;
+      double getCurrentDiff(const gm::Pose2D initialPose, const COSTMAP_SEARCH_MODE mode = FORWARD) const;
+      double getCurrentDistDiff(const gm::Pose2D initialPose, const double distination, const COSTMAP_SEARCH_MODE mode = FORWARD) const;
+      double getMinimalDistanceToObstacle(const COSTMAP_SEARCH_MODE mode) const;
+      int determineTurnDirection();
+      double getDistBetweenTwoPoints(const gm::Pose2D pose1, const gm::Pose2D pose2) const;
+
+
+      ros::NodeHandle nh_;
+      costmap_2d::Costmap2DROS* global_costmap_;
+      costmap_2d::Costmap2DROS* local_costmap_;
+      costmap_2d::Costmap2D costmap_; // Copy of local_costmap_, used by world model
+      std::string name_;
+      // tf::TransformListener* tf_;
+      tf2_ros::Buffer* tf_;
+      ros::Publisher cmd_vel_pub_;
+      ros::Publisher recover_run_pub_;
+      bool initialized_;
+
+      // Memory owned by this object
+      // Mutable because footprintCost is not declared const
+      mutable base_local_planner::CostmapModel* world_model_;
+
+      gm::Twist base_frame_twist_;
+      
+      double duration_;
+      double linear_speed_limit_;
+      double angular_speed_limit_;
+      double linear_acceleration_limit_;
+      double angular_acceleration_limit_;
+      double controller_frequency_;
+      double simulation_frequency_;
+      double simulation_inc_;
+
+      bool only_single_steering_;
+      int trial_times_;
+      double obstacle_patience_;
+      double obstacle_check_frequency_;
+      double sim_angle_resolution_;
+      //-- back
+      double linear_vel_back_;
+      double step_back_length_;
+      double step_back_timeout_;
+      //-- steer
+      double linear_vel_steer_;
+      double angular_speed_steer_;
+      double turn_angle_;
+      double steering_timeout_;
+      //-- forward
+      double linear_vel_forward_;
+      double step_forward_length_;
+      double step_forward_timeout_;
+
   };
-
-  enum TURN_DIRECTION
-  {
-    LEFT,
-    RIGHT,
-  };
-
-  enum TURN_NO
-  {
-    FIRST_TURN = 0,
-    SECOND_TURN = 1,
-  };
-  static const int CNT_TURN = 2;
-
-  gm::Twist TWIST_STOP;
-
-  gm::Pose2D getCurrentLocalPose () const;
-  gm::Twist scaleGivenAccelerationLimits (const gm::Twist& twist, const double time_remaining) const;
-  gm::Pose2D getPoseToObstacle (const gm::Pose2D& current, const gm::Twist& twist) const;
-  double normalizedPoseCost (const gm::Pose2D& pose) const;
-  gm::Twist transformTwist (const gm::Pose2D& pose) const;
-  void moveSpacifiedLength (const gm::Twist twist, const double length, const COSTMAP_SEARCH_MODE mode = FORWARD) const;
-  double getCurrentDiff(const gm::Pose2D initialPose, const COSTMAP_SEARCH_MODE mode = FORWARD) const;
-  double getCurrentDistDiff(const gm::Pose2D initialPose, const double distination, const COSTMAP_SEARCH_MODE mode = FORWARD) const;
-  double getMinimalDistanceToObstacle(const COSTMAP_SEARCH_MODE mode) const;
-  int determineTurnDirection();
-  double getDistBetweenTwoPoints(const gm::Pose2D pose1, const gm::Pose2D pose2) const;
-
-
-  ros::NodeHandle nh_;
-  costmap_2d::Costmap2DROS* global_costmap_;
-  costmap_2d::Costmap2DROS* local_costmap_;
-  costmap_2d::Costmap2D costmap_; // Copy of local_costmap_, used by world model
-  std::string name_;
-  tf::TransformListener* tf_;
-  ros::Publisher cmd_vel_pub_;
-  ros::Publisher recover_run_pub_;
-  bool initialized_;
-
-  // Memory owned by this object
-  // Mutable because footprintCost is not declared const
-  mutable base_local_planner::CostmapModel* world_model_;
-
-  gm::Twist base_frame_twist_;
-  
-  double duration_;
-  double linear_speed_limit_;
-  double angular_speed_limit_;
-  double linear_acceleration_limit_;
-  double angular_acceleration_limit_;
-  double controller_frequency_;
-  double simulation_frequency_;
-  double simulation_inc_;
-
-  bool only_single_steering_;
-  int trial_times_;
-  double obstacle_patience_;
-  double obstacle_check_frequency_;
-  double sim_angle_resolution_;
-  //-- back
-  double linear_vel_back_;
-  double step_back_length_;
-  double step_back_timeout_;
-  //-- steer
-  double linear_vel_steer_;
-  double angular_speed_steer_;
-  double turn_angle_;
-  double steering_timeout_;
-  //-- forward
-  double linear_vel_forward_;
-  double step_forward_length_;
-  double step_forward_timeout_;
-
-};
 
 } // namespace stepback_and_steerturn_recovery
 

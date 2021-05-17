@@ -177,7 +177,14 @@ double StepBackAndSteerTurnRecovery::normalizedPoseCost (const gm::Pose2D& pose)
   costmap_2d::Costmap2D* costmap = local_costmap_->getCostmap();
   costmap->worldToMap(p.x, p.y, pose_map_idx_x, pose_map_idx_y);  // convert point unit from [m] to [idx]
   ROS_DEBUG_NAMED ("top", "Trying to get cost at (%d, %d) in getCost", pose_map_idx_x, pose_map_idx_y);
-  const double c = costmap->getCost(pose_map_idx_x, pose_map_idx_y);
+//   const double c = costmap->getCost(pose_map_idx_x, pose_map_idx_y);
+  double c;
+  if(pose_map_idx_x < 1e8 && pose_map_idx_y < 1e8) {
+      c = costmap->getCost(pose_map_idx_x, pose_map_idx_y);
+  }
+  else {
+      c = 0.0;
+  }
 
   return c < 0 ? 1e9 : c;
 }
@@ -189,35 +196,36 @@ double StepBackAndSteerTurnRecovery::normalizedPoseCost (const gm::Pose2D& pose)
 /// the first k of those d seconds, but this is not done
 gm::Pose2D StepBackAndSteerTurnRecovery::getPoseToObstacle (const gm::Pose2D& current, const gm::Twist& twist) const
 {
-  double cost = 0;
-  cost = normalizedPoseCost(current);
-  double t; // Will hold the first time that is invalid
-  gm::Pose2D current_tmp = current;
-  double next_cost;
 
-  ROS_DEBUG_NAMED ("top", " ");
-  for (t=simulation_inc_; t<=duration_ + 500; t+=simulation_inc_) {
-      ROS_DEBUG_NAMED ("top", "start loop");
-      current_tmp = forwardSimulate(current, twist, t);
-      ROS_DEBUG_NAMED ("top", "finish fowardSimulate");
-      next_cost = normalizedPoseCost(current_tmp);
-      ROS_DEBUG_NAMED ("top", "finish Cost");
-    //if (next_cost > cost) {
-    if (/*next_cost == costmap_2d::INSCRIBED_INFLATED_OBSTACLE ||*/ next_cost == costmap_2d::LETHAL_OBSTACLE) {
-      ROS_DEBUG_STREAM_NAMED ("cost", "Cost at " << t << " and pose " << forwardSimulate(current, twist, t)
-                              << " is " << next_cost << " which is greater than previous cost " << cost);
-      break;
+    double cost = 0;
+    cost = normalizedPoseCost(current);
+    double t; // Will hold the first time that is invalid
+    gm::Pose2D current_tmp = current;
+    double next_cost;
+
+    ROS_DEBUG_NAMED ("top", " ");
+    for (t=simulation_inc_; t<=duration_ + 500; t+=simulation_inc_) {
+        ROS_DEBUG_NAMED ("top", "start loop");
+        current_tmp = forwardSimulate(current, twist, t);
+        ROS_DEBUG_NAMED ("top", "finish fowardSimulate");
+        next_cost = normalizedPoseCost(current_tmp);
+        ROS_DEBUG_NAMED ("top", "finish Cost");
+        //if (next_cost > cost) {
+        if (/*next_cost == costmap_2d::INSCRIBED_INFLATED_OBSTACLE ||*/ next_cost == costmap_2d::LETHAL_OBSTACLE) {
+        ROS_DEBUG_STREAM_NAMED ("cost", "Cost at " << t << " and pose " << forwardSimulate(current, twist, t)
+                                << " is " << next_cost << " which is greater than previous cost " << cost);
+        break;
+        }
+        cost = next_cost;
     }
-    cost = next_cost;
-  }
-  ROS_DEBUG_NAMED ("top", "cost = %.2f, next_cost = %.2f", cost, next_cost);
-  ROS_DEBUG_NAMED ("top", "twist.linear.x = %.2f, twist.angular.z = %.2f", twist.linear.x, twist.angular.z);
-  ROS_DEBUG_NAMED ("top", "init = (%.2f, %.2f, %.2f), current = (%.2f, %.2f, %.2f)",
-                  current.x, current.y, current.theta, current_tmp.x, current_tmp.y, current_tmp.theta);
-  ROS_DEBUG_NAMED ("top", "time = %.2f", t);
+    ROS_DEBUG_NAMED ("top", "cost = %.2f, next_cost = %.2f", cost, next_cost);
+    ROS_DEBUG_NAMED ("top", "twist.linear.x = %.2f, twist.angular.z = %.2f", twist.linear.x, twist.angular.z);
+    ROS_DEBUG_NAMED ("top", "init = (%.2f, %.2f, %.2f), current = (%.2f, %.2f, %.2f)",
+                    current.x, current.y, current.theta, current_tmp.x, current_tmp.y, current_tmp.theta);
+    ROS_DEBUG_NAMED ("top", "time = %.2f", t);
 
-  // return t-simulation_inc_;
-  return current_tmp;
+    // return t-simulation_inc_;
+    return current_tmp;
 }
 
 double linearSpeed (const gm::Twist& twist)
@@ -413,7 +421,6 @@ double StepBackAndSteerTurnRecovery::getMinimalDistanceToObstacle(const COSTMAP_
 {
     double max_angle, min_angle;
     gm::Twist twist = TWIST_STOP;
-
     switch (mode) {
     case FORWARD:
         twist.linear.x = linear_vel_forward_;
@@ -443,13 +450,14 @@ double StepBackAndSteerTurnRecovery::getMinimalDistanceToObstacle(const COSTMAP_
     double min_dist = INFINITY;
 
     for(double angle = min_angle; angle < max_angle; angle+=sim_angle_resolution_)
-      {
-          twist.angular.z = angle;
-          gm::Pose2D pose_to_obstacle = getPoseToObstacle(current, twist);
-          double dist_to_obstacle = getDistBetweenTwoPoints(current, pose_to_obstacle);
+    {
+        twist.angular.z = angle;
+        gm::Pose2D pose_to_obstacle = getPoseToObstacle(current, twist);
+        double dist_to_obstacle = getDistBetweenTwoPoints(current, pose_to_obstacle);
 
-          if(dist_to_obstacle < min_dist)
-              min_dist = dist_to_obstacle;
+        if(dist_to_obstacle < min_dist)
+            min_dist = dist_to_obstacle;
+
     }
 
     ROS_DEBUG_NAMED ("top", "min_dist = %.2f", min_dist);
